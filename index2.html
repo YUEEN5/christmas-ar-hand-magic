@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Christmas AR Hand Magic 🎄</title>
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&family=Noto+Sans+SC:wght@700&display=swap" rel="stylesheet">
+
+    <!-- External Libraries (CDN) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+    <style>
+        :root {
+            --primary: #ff0f0f;
+            --gold: #ffd700;
+            --glass: rgba(10, 10, 10, 0.85);
+        }
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        /* Full Screen Backgrounds */
+        #canvas-container {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 2;
+        }
+        
+        /* Video needs to cover the screen like CSS background-size: cover */
+        #input-video {
+            position: absolute;
+            top: 50%; left: 50%;
+            min-width: 100%; min-height: 100%;
+            width: auto; height: auto;
+            transform: translate(-50%, -50%) scaleX(-1); /* Center & Mirror */
+            z-index: 1;
+            object-fit: cover; /* Ensures no black bars */
+        }
+
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        /* Greeting Text */
+        #greeting-display {
+            position: absolute;
+            top: 45%;
+            left: 50%;
+            width: 90%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            pointer-events: none;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            opacity: 0.8;
+            text-shadow: 0 0 10px var(--gold), 0 0 20px var(--primary);
+        }
+        #greeting-display.active {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1.3);
+        }
+        .text-en {
+            font-family: 'Dancing Script', cursive;
+            font-size: clamp(3rem, 10vw, 5rem); /* Responsive font size */
+            color: #fff;
+            margin: 0;
+            line-height: 1.1;
+        }
+        .text-cn {
+            font-family: 'Noto Sans SC', sans-serif;
+            font-size: clamp(1.5rem, 5vw, 2.5rem);
+            color: #ffeaea;
+            margin-top: 10px;
+        }
+
+        /* Settings Button (Top Right) */
+        #settings-toggle {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+            background: var(--gold);
+            border-radius: 50%;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            z-index: 20;
+            pointer-events: auto;
+            box-shadow: 0 4px 15px rgba(255, 215, 0, 0.5);
+            display: flex; align-items: center; justify-content: center;
+            transition: transform 0.2s;
+        }
+        #settings-toggle:active { transform: scale(0.9); }
+
+        /* Controls Panel */
+        #controls {
+            position: absolute;
+            background: var(--glass);
+            backdrop-filter: blur(15px);
+            padding: 20px;
+            color: white;
+            pointer-events: auto;
+            transition: transform 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+            z-index: 19;
+            box-sizing: border-box;
+            overflow-y: auto;
+            border: 1px solid rgba(255, 215, 0, 0.2);
+        }
+
+        /* Desktop Style: Right Sidebar */
+        @media (min-width: 769px) {
+            #controls {
+                top: 0; right: 0;
+                width: 320px;
+                height: 100%;
+                border-left: 2px solid var(--gold);
+                transform: translateX(100%); /* Hidden by default */
+            }
+            #controls.open { transform: translateX(0); }
+        }
+
+        /* Mobile Style: Bottom Sheet */
+        @media (max-width: 768px) {
+            #controls {
+                bottom: 0; left: 0;
+                width: 100%;
+                max-height: 70vh;
+                border-top: 2px solid var(--gold);
+                border-radius: 20px 20px 0 0;
+                transform: translateY(100%); /* Hidden by default */
+            }
+            #controls.open { transform: translateY(0); }
+            
+            /* Adjust inputs for touch */
+            input[type="text"], button.action-btn {
+                padding: 12px;
+                font-size: 16px; 
+            }
+        }
+
+        /* Controls Content */
+        h2 { margin-top: 0; font-size: 1.2rem; border-bottom: 1px solid #555; padding-bottom: 10px; color: var(--gold); display: flex; justify-content: space-between; align-items: center; }
+        .close-btn { background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; }
+        .input-group { margin-bottom: 15px; }
+        label { display: block; font-size: 0.8rem; margin-bottom: 5px; color: #aaa; }
+        input[type="text"] {
+            width: 100%;
+            background: rgba(255,255,255,0.15);
+            border: 1px solid #555;
+            color: white;
+            padding: 10px;
+            border-radius: 6px;
+            box-sizing: border-box;
+        }
+        button.action-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(45deg, #c31432, #240b36);
+            border: none;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+            font-size: 1rem;
+        }
+
+        /* Status Bar */
+        #status-bar {
+            width: 100%;
+            background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+            padding: 20px 0 30px 0; /* Extra padding for iPhone home bar */
+            text-align: center;
+            color: #00ff88;
+            font-family: monospace;
+            font-size: 12px;
+            pointer-events: none;
+        }
+        .mode-badge {
+            background: rgba(0, 255, 136, 0.2);
+            padding: 4px 8px;
+            border-radius: 12px;
+            border: 1px solid #00ff88;
+            margin-left: 5px;
+        }
+        
+        /* Loader */
+        #loader {
+            position: fixed;
+            top:0; left:0; width:100%; height:100%;
+            background: #000;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--gold);
+        }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 4px solid #333;
+            border-top: 4px solid var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    </style>
+</head>
+<body>
+
+    <!-- Camera Source (Hidden visually, rendered to canvas or used as overlay) -->
+    <!-- We use a trick: Scale the video to cover the screen using CSS object-fit equivalent on specific elements if needed. 
+         But simple CSS on the video tag works best for "Fixed" background. -->
+    <video id="input-video" playsinline muted autoplay></video>
+
+    <!-- 3D Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- Toggle Button -->
+    <button id="settings-toggle" onclick="togglePanel()">⚙️</button>
+
+    <!-- UI Layer -->
+    <div id="ui-layer">
+        
+        <!-- Center Text -->
+        <div id="greeting-display">
+            <h1 class="text-en" id="text-en">Merry Christmas</h1>
+            <h2 class="text-cn" id="text-cn">圣诞快乐</h2>
+        </div>
+
+        <!-- Spacer for layout -->
+        <div style="flex-grow: 1;"></div>
+
+        <!-- Status -->
+        <div id="status-bar">
+            <span>Status: <span id="status-text">Initializing...</span></span>
+            <span class="mode-badge" id="mode-badge">MOUSE/TOUCH</span>
+        </div>
+    </div>
+
+    <!-- Sliding Controls Panel (Hidden by default) -->
+    <div id="controls">
+        <h2>
+            <span>🎄 Config</span>
+            <button class="close-btn" onclick="togglePanel()">×</button>
+        </h2>
+        
+        <div id="inputs-container"></div>
+
+        <button class="action-btn" onclick="generateShareLink()">🔗 Generate Link</button>
+        <div id="share-result" style="margin-top:10px; font-size:0.8rem; word-break:break-all; color:#aaa;"></div>
+        <div style="height: 50px;"></div> <!-- Spacer for mobile scroll -->
+    </div>
+
+    <!-- Loader -->
+    <div id="loader">
+        <div class="spinner"></div>
+        <div style="font-family: 'Dancing Script'; font-size: 1.5rem;">Loading Magic...</div>
+    </div>
+
+    <script>
+        /**
+         * 🎄 GLOBAL CONFIGURATION & STATE
+         */
+        const CONFIG = {
+            particleCount: 14000, // Slightly reduced for mobile performance
+            coinCount: 300,
+            shapes: [
+                { id: 'gift', name: 'Gift Box', defaultEn: 'Surprise!', defaultCn: '惊喜礼物' },
+                { id: 'tree', name: 'Xmas Tree', defaultEn: 'Merry Christmas', defaultCn: '圣诞快乐' },
+                { id: 'wreath', name: 'Wreath', defaultEn: 'Season\'s Greetings', defaultCn: '节日问候' },
+                { id: 'hat', name: 'Santa Hat', defaultEn: 'Ho Ho Ho!', defaultCn: '圣诞老人' },
+                { id: 'cane', name: 'Candy Cane', defaultEn: 'Sweet Holidays', defaultCn: '甜蜜假期' },
+                { id: 'heart', name: 'Warm Heart', defaultEn: 'With Love', defaultCn: '爱意满满' }
+            ],
+            colors: {
+                red: new THREE.Color(0xff0f0f),
+                green: new THREE.Color(0x0f8f0f),
+                gold: new THREE.Color(0xffd700),
+                white: new THREE.Color(0xffffff)
+            }
+        };
+
+        const STATE = {
+            currentShapeIndex: 0,
+            interactionMode: 'MOUSE', 
+            isScattering: false,
+            rotationTarget: { x: 0, y: 0 },
+            rotationCurrent: { x: 0, y: 0 },
+            texts: [],
+            isPanelOpen: false
+        };
+
+        // URL Params
+        const urlParams = new URLSearchParams(window.location.search);
+        try {
+            const encoded = urlParams.get('texts');
+            if(encoded) STATE.texts = JSON.parse(decodeURIComponent(encoded));
+        } catch(e){}
+        
+        if (STATE.texts.length !== CONFIG.shapes.length) {
+            STATE.texts = CONFIG.shapes.map(s => ({ en: s.defaultEn, cn: s.defaultCn }));
+        }
+
+        // --- UI Initialization ---
+        const inputsContainer = document.getElementById('inputs-container');
+        CONFIG.shapes.forEach((shape, idx) => {
+            const div = document.createElement('div');
+            div.className = 'input-group';
+            div.innerHTML = `
+                <label>${shape.name}</label>
+                <input type="text" value="${STATE.texts[idx].en}" oninput="updateText(${idx}, 'en', this.value)" placeholder="English">
+                <input type="text" value="${STATE.texts[idx].cn}" style="margin-top:5px" oninput="updateText(${idx}, 'cn', this.value)" placeholder="Chinese">
+            `;
+            inputsContainer.appendChild(div);
+        });
+
+        function updateText(idx, lang, val) {
+            STATE.texts[idx][lang] = val;
+            if (STATE.currentShapeIndex === idx) updateOverlayText();
+        }
+
+        function updateOverlayText() {
+            const t = STATE.texts[STATE.currentShapeIndex];
+            document.getElementById('text-en').innerText = t.en;
+            document.getElementById('text-cn').innerText = t.cn;
+        }
+
+        function togglePanel() {
+            STATE.isPanelOpen = !STATE.isPanelOpen;
+            const panel = document.getElementById('controls');
+            if (STATE.isPanelOpen) panel.classList.add('open');
+            else panel.classList.remove('open');
+        }
+
+        function generateShareLink() {
+            const json = JSON.stringify(STATE.texts);
+            const url = `${window.location.origin}${window.location.pathname}?texts=${encodeURIComponent(json)}`;
+            const resDiv = document.getElementById('share-result');
+            navigator.clipboard.writeText(url).then(() => {
+                resDiv.innerText = "✅ Link copied!";
+            }).catch(() => {
+                resDiv.innerText = "Select & Copy URL above.";
+                window.history.pushState({}, '', url);
+            });
+        }
+
+        /**
+         * 📐 SHAPE FACTORY
+         */
+        const ShapeFactory = {
+            generate: (type) => {
+                const positions = new Float32Array(CONFIG.particleCount * 3);
+                const colors = new Float32Array(CONFIG.particleCount * 3);
+                const p = new THREE.Vector3();
+                const c = new THREE.Color();
+
+                for (let i = 0; i < CONFIG.particleCount; i++) {
+                    // Reset helper vars
+                    let x=0, y=0, z=0;
+                    
+                    switch (type) {
+                        case 'gift': 
+                            p.set(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).multiplyScalar(4.5);
+                            if (Math.abs(p.x)<0.6 || Math.abs(p.y)<0.6) c.copy(CONFIG.colors.gold);
+                            else c.copy(CONFIG.colors.red);
+                            break;
+
+                        case 'tree': 
+                            const h = Math.random() * 5.5; 
+                            const r = (5.5 - h) * 0.4 * Math.sqrt(Math.random());
+                            const th = Math.random() * 6.28;
+                            p.set(r * Math.cos(th), h - 3, r * Math.sin(th));
+                            c.copy(Math.random()>0.9 ? CONFIG.colors.gold : CONFIG.colors.green);
+                            break;
+
+                        case 'wreath': 
+                            const u = Math.random() * 6.28;
+                            const v = Math.random() * 6.28;
+                            const tube = 0.6 + Math.random()*0.3;
+                            p.x = (2.2 + tube * Math.cos(v)) * Math.cos(u);
+                            p.y = (2.2 + tube * Math.cos(v)) * Math.sin(u);
+                            p.z = tube * Math.sin(v);
+                            c.copy(Math.random()>0.9 ? CONFIG.colors.red : CONFIG.colors.green);
+                            break;
+
+                        case 'hat': 
+                            if(Math.random() < 0.75) {
+                                const hh = Math.random() * 3.5;
+                                const rr = (3.5-hh)*0.5;
+                                const ang = Math.random()*6.28;
+                                p.set(rr*Math.cos(ang) + hh*0.3, hh-1.5, rr*Math.sin(ang));
+                                c.copy(CONFIG.colors.red);
+                            } else {
+                                const ang = Math.random()*6.28;
+                                const rr = 1.8 + Math.random()*0.4;
+                                p.set(rr*Math.cos(ang), -1.5+Math.random()*0.5, rr*Math.sin(ang));
+                                c.copy(CONFIG.colors.white);
+                            }
+                            break;
+
+                        case 'cane':
+                            const len = Math.random() * 4;
+                            const isHook = Math.random() > 0.65;
+                            const thick = 0.25 + Math.random()*0.15;
+                            const circ = Math.random() * 6.28;
+                            if(isHook) {
+                                const ha = Math.random()*3.14;
+                                const hr = 0.9;
+                                p.x = 0.9 + (hr+thick*Math.cos(circ))*Math.cos(ha);
+                                p.y = 1.2 + (hr+thick*Math.cos(circ))*Math.sin(ha);
+                                p.z = thick*Math.sin(circ);
+                            } else {
+                                p.x = 0.9 + thick*Math.cos(circ);
+                                p.y = 1.2 - len;
+                                p.z = thick*Math.sin(circ);
+                            }
+                            c.copy(Math.sin(p.y*4 + p.x*3) > 0 ? CONFIG.colors.red : CONFIG.colors.white);
+                            break;
+
+                        case 'heart':
+                            const t = Math.random() * 6.28;
+                            const rad = Math.random();
+                            const xH = 16 * Math.pow(Math.sin(t), 3);
+                            const yH = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+                            p.set(xH, yH, (Math.random()-0.5)*4).multiplyScalar(0.18 * rad);
+                            c.copy(CONFIG.colors.red);
+                            break;
+                    }
+
+                    positions[i*3] = p.x; positions[i*3+1] = p.y; positions[i*3+2] = p.z;
+                    colors[i*3] = c.r; colors[i*3+1] = c.g; colors[i*3+2] = c.b;
+                }
+                return { positions, colors };
+            }
+        };
+
+        /**
+         * 🎨 THREE.JS SCENE
+         */
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
+        
+        // Initial Camera Position based on aspect ratio (Portrait vs Landscape)
+        function adjustCamera() {
+            const aspect = window.innerWidth / window.innerHeight;
+            if(aspect < 0.8) camera.position.z = 12; // Mobile Portrait -> Zoom out
+            else camera.position.z = 8; // Desktop -> Closer
+        }
+        adjustCamera();
+
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Cap pixel ratio for performance
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // Lights
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const pl = new THREE.PointLight(0xffd700, 1.2, 20);
+        pl.position.set(5, 5, 5);
+        scene.add(pl);
+
+        // Particles
+        const geom = new THREE.BufferGeometry();
+        const initData = ShapeFactory.generate('gift');
+        geom.setAttribute('position', new THREE.BufferAttribute(initData.positions, 3));
+        geom.setAttribute('color', new THREE.BufferAttribute(initData.colors, 3));
+
+        // Targets for animation
+        let targetPos = new Float32Array(initData.positions);
+        let targetCol = new Float32Array(initData.colors);
+        const velocities = new Float32Array(CONFIG.particleCount * 3);
+
+        const mat = new THREE.PointsMaterial({
+            size: 0.1, vertexColors: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending
+        });
+        const system = new THREE.Points(geom, mat);
+        scene.add(system);
+
+        /**
+         * 🕹️ INPUT & INTERACTION
+         */
+        
+        function switchShape(idx) {
+            STATE.currentShapeIndex = idx;
+            const data = ShapeFactory.generate(CONFIG.shapes[idx].id);
+            targetPos.set(data.positions);
+            targetCol.set(data.colors);
+            updateOverlayText();
+        }
+
+        function nextShape() {
+            switchShape((STATE.currentShapeIndex + 1) % CONFIG.shapes.length);
+        }
+
+        // --- Mouse & Touch Fallback ---
+        function handleStart() {
+            if(STATE.interactionMode === 'MOUSE') {
+                STATE.isScattering = true;
+                triggerScatter();
+            }
+        }
+        function handleEnd() {
+            if(STATE.interactionMode === 'MOUSE') {
+                STATE.isScattering = false;
+                triggerReassemble();
+            }
+        }
+        function handleMove(x, y) {
+            // Normalized X/Y (-1 to 1)
+            STATE.rotationTarget.x = -y * 0.8;
+            STATE.rotationTarget.y = x * 0.8;
+        }
+
+        // Mouse Events
+        document.addEventListener('mousedown', handleStart);
+        document.addEventListener('mouseup', handleEnd);
+        document.addEventListener('mousemove', e => {
+            if(STATE.interactionMode === 'MOUSE') {
+                handleMove(
+                    (e.clientX / window.innerWidth) * 2 - 1,
+                    -(e.clientY / window.innerHeight) * 2 + 1
+                );
+            }
+        });
+
+        // Touch Events
+        document.addEventListener('touchstart', handleStart, {passive: false});
+        document.addEventListener('touchend', handleEnd);
+        document.addEventListener('touchmove', e => {
+            if(STATE.interactionMode === 'MOUSE') {
+                // Prevent scrolling while interacting
+                // e.preventDefault(); 
+                const touch = e.touches[0];
+                handleMove(
+                    (touch.clientX / window.innerWidth) * 2 - 1,
+                    -(touch.clientY / window.innerHeight) * 2 + 1
+                );
+            }
+        }, {passive: false});
+
+        // Trigger Logic
+        function triggerScatter() {
+            const p = geom.attributes.position.array;
+            for(let i=0; i<CONFIG.particleCount; i++){
+                // Explosion velocity direction
+                velocities[i*3] = (Math.random()-0.5) + p[i*3]*0.2;
+                velocities[i*3+1] = (Math.random()-0.5) + p[i*3+1]*0.2;
+                velocities[i*3+2] = (Math.random()-0.5) + p[i*3+2]*0.2;
+            }
+            document.getElementById('greeting-display').classList.add('active');
+        }
+
+        function triggerReassemble() {
+            nextShape();
+            document.getElementById('greeting-display').classList.remove('active');
+        }
+
+        /**
+         * 📷 MEDIA PIPE (HANDS)
+         */
+        const videoElement = document.getElementById('input-video');
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 0, // 0 is faster for mobile
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        hands.onResults(results => {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                if(STATE.interactionMode !== 'HAND') {
+                    STATE.interactionMode = 'HAND';
+                    document.getElementById('mode-badge').innerText = "HAND AR MODE";
+                    document.getElementById('status-text').innerText = "Hand Detected";
+                }
+
+                const lm = results.multiHandLandmarks[0];
+                
+                // 1. Rotation (Palm Center)
+                const rx = (lm[9].y - 0.5) * 2; 
+                const ry = (lm[9].x - 0.5) * 2;
+                STATE.rotationTarget.x = rx;
+                STATE.rotationTarget.y = ry;
+
+                // 2. Pinch (Thumb tip 4 & Index tip 8)
+                const d = Math.hypot(lm[8].x - lm[4].x, lm[8].y - lm[4].y);
+                
+                // If pinched (close) -> Explode
+                if (d < 0.06) { 
+                    if (!STATE.isScattering) {
+                        STATE.isScattering = true;
+                        triggerScatter();
+                    }
+                } else {
+                    if (STATE.isScattering) {
+                        STATE.isScattering = false;
+                        triggerReassemble();
+                    }
+                }
+            }
+        });
+
+        const cameraUtils = new Camera(videoElement, {
+            onFrame: async () => { await hands.send({image: videoElement}); },
+            facingMode: "user", // Front camera
+            width: 640, height: 480 // Low res is fine for tracking, video element scales via CSS
+        });
+
+        cameraUtils.start().then(() => {
+            document.getElementById('loader').style.display = 'none';
+        }).catch(() => {
+            document.getElementById('loader').style.display = 'none';
+            document.getElementById('status-text').innerText = "Camera Denied. Touch Mode.";
+        });
+
+        /**
+         * 🎞️ ANIMATION LOOP
+         */
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Interpolate rotation
+            STATE.rotationCurrent.x += (STATE.rotationTarget.x - STATE.rotationCurrent.x) * 0.1;
+            STATE.rotationCurrent.y += (STATE.rotationTarget.y - STATE.rotationCurrent.y) * 0.1;
+            system.rotation.x = STATE.rotationCurrent.x;
+            system.rotation.y = STATE.rotationCurrent.y;
+
+            const pos = geom.attributes.position.array;
+            const col = geom.attributes.color.array;
+            
+            for(let i=0; i<CONFIG.particleCount; i++) {
+                const ix = i*3;
+                if(STATE.isScattering) {
+                    pos[ix] += velocities[ix] * 0.1;
+                    pos[ix+1] += velocities[ix+1] * 0.1;
+                    pos[ix+2] += velocities[ix+2] * 0.1;
+                } else {
+                    pos[ix] += (targetPos[ix] - pos[ix]) * 0.12;
+                    pos[ix+1] += (targetPos[ix+1] - pos[ix+1]) * 0.12;
+                    pos[ix+2] += (targetPos[ix+2] - pos[ix+2]) * 0.12;
+                    
+                    col[ix] += (targetCol[ix] - col[ix]) * 0.08;
+                    col[ix+1] += (targetCol[ix+1] - col[ix+1]) * 0.08;
+                    col[ix+2] += (targetCol[ix+2] - col[ix+2]) * 0.08;
+                }
+            }
+            geom.attributes.position.needsUpdate = true;
+            geom.attributes.color.needsUpdate = true;
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Responsive Resizing
+        window.addEventListener('resize', () => {
+            adjustCamera();
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Initialize
+        updateOverlayText();
+
+    </script>
+</body>
+</html>
